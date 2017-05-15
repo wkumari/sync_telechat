@@ -16,7 +16,20 @@ import (
 	"strings"
 	"time"
 )
+// CLM: Normally all 'const' and 'var' things at the global level are in:
+/*
 
+const (
+ foo = 1
+ bar = 3
+)
+
+var (
+  bling = "thing"
+  blaze = "thong"
+)
+
+*/
 // String to use if the Telechat date is unknown.
 const kUnknownTelechat = "Unknown-date"
 
@@ -35,10 +48,15 @@ var date string
 
 //Expand homedir - stolen from SO.
 func expand(path string) (string, error) {
+	// CLM I might use: https://golang.org/pkg/strings/#HasPrefix for the 'has ~' check.
 	if len(path) == 0 || path[0] != '~' {
 		return path, nil
 	}
 
+	// CLM I think the general 'go practice' is to use short names when things don't last long:
+	// u, err := user.Current()
+	// this is fine though, just sayin you'll often find single char vars ... if you don't care
+	// that the var live longer than  a few lines then 1 char is fine.
 	usr, err := user.Current()
 	if err != nil {
 		return "", err
@@ -56,6 +74,7 @@ func contains(array []string, item string) bool {
 	return false
 }
 
+// CLM "is an" ?
 // Checks if provided string an Internet Draft name?
 func ExtractDoc(document string) string {
 	if strings.HasPrefix(document, "draft-") {
@@ -82,6 +101,7 @@ func isdoc(t html.Token) bool {
 func ExtractDate(telechat string) string {
 	// Parses out and returns the date from a string. E.g:
 	// "IESG telechat 2017-04-27."   -> "2017-04-27"
+	// CLM use back-ticks in regexp creation... in case you end up needing verbatim content.
 	r := regexp.MustCompile("IESG telechat (.*)")
 	date := r.FindStringSubmatch(telechat)
 	if date == nil {
@@ -92,6 +112,7 @@ func ExtractDate(telechat string) string {
 	return date[1]
 }
 
+// CLM docstring up above func block.
 func fetch_doc(basedir string, date string,
 	document string, done chan string) {
 	// Fetches a single document, puts it in the directory
@@ -128,12 +149,13 @@ func fetch_doc(basedir string, date string,
 	}
 	done <- fmt.Sprintf("%v: Downloaded %s: %d bytes.", date, filename, n)
 }
-
+// CLM move the func documentation above the start of the block
 func fetch_docs(basedir string, documents map[string][]string) []string {
 	// Concurrently fetches documents.
 	// Takes a map of slices, {"date": [doc1, doc2]} and
 	// gets the documents.
 
+	// CLM you might consider making this a seperate function.
 	// Make directories if not already exist
 	for date, _ := range documents {
 		err := os.Mkdir(filepath.Join(basedir, date), 0777)
@@ -146,6 +168,24 @@ func fetch_docs(basedir string, documents map[string][]string) []string {
 	doccount := 0
 	var items []string
 	channel := make(chan string)
+	
+	// CLM I would have (probably) done:
+	// for date, docs := range documents{
+	//   for _, doc := range docs {
+	//   }
+	// yours works, but isn't what I'd expected.
+	// you are also making a LOT of channel workers...
+	// normally you'd make like 'maxConcurrent' (10?)
+	// I normally add 'all things to work on' to a channel,
+	// then start kicking off worker threads to drain the queue.
+	// you made your channel unbounded, so you could just add
+	// all docs to the channel, then kick off N fetch_doc routines.
+	//
+	// Oh, though your channel here is just for results, not
+	// for a list of items to work on... so you'd have to do a
+	// bunch of refactor to do the above suggestion.
+	// This method works, mind you if you have 1000 documents
+	// you'll kick off near 1000 'workers' .. which could go badly.
 	for date, _ = range documents {
 		for _, document := range documents[date] {
 			go fetch_doc(basedir, date, document, channel)
@@ -161,9 +201,12 @@ func fetch_docs(basedir string, documents map[string][]string) []string {
 			items = append(items, "Timeout downloading a draft....")
 		}
 	}
+	// you'll proabbaly want to close(channel) too.
 	return items
 }
 
+// CLM normally the func godoc stuff is above the function block:
+// fetchIESGAgenda implements fetching of the agenda webpage, parsing that for .....
 func fetch_iesg_agenda(url string) map[string][]string {
 	// This goes off and fetches the webpage which contains the IESG agenda.
 	// It then parses the page looking for dates, and downloads the documents
@@ -202,6 +245,8 @@ func fetch_iesg_agenda(url string) map[string][]string {
 			// Check if the token is an <a> tag or an <h2>
 			switch {
 			case t.Data == "a":
+				// CLM you might just regexp 'does this have /doc/... in it?' instead of calling
+				// a seperate function. I suppose that means getting all of the element as a string though.
 				if isdoc(t) {
 					z.Next()
 					docname := ExtractDoc(string(z.Text()))
@@ -243,8 +288,11 @@ func init() {
 
 func main() {
 
+	// CLM These aren't necessary, the flags package will invent the vars for you.
 	var basedir, baseurl string
 
+	// CLM I also often do the flags processing in the global var() section. This might be
+	// a bad 'python' habit though.
 	flag.Usage = usage
 	flag.StringVar(&basedir, "basedir", kBaseDir,
 		"Base directory to put files. Makes date based directories here.")
@@ -258,7 +306,9 @@ func main() {
 	// Convert the ~ (if any) into a home directory.
 	basedir, _ = expand(basedir)
 
+	// CLM fetchIESGAgenda - silly style rules about _ in function names, and cases for acronyms.
 	telechats := fetch_iesg_agenda(baseurl)
+	// CLM fetchDocs - same as above
 	results := fetch_docs(basedir, telechats)
 	for _, result := range results {
 		if result != "" {

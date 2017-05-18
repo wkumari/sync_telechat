@@ -1,5 +1,5 @@
 // This program read the upcoming IESG telechats, downloads PDF versions
-// of each document, and places them in directories according to the date.
+// of each new document, and places them in directories according to the date.
 package main
 
 import (
@@ -17,33 +17,32 @@ import (
 	"time"
 )
 
-// String to use if the Telechat date is unknown.
-const kUnknownTelechat = "Unknown-date"
+const (
+	// String to use if the Telechat date is unknown.
+	kUnknownTelechat = "Unknown-date"
 
-// Where the IESG agenda lives.
-const kUrl = "https://datatracker.ietf.org/iesg/agenda/documents/"
+	// Where the IESG agenda lives.
+	kUrl = "https://datatracker.ietf.org/iesg/agenda/documents/"
 
-// Where the PDF versions of drafts live.
-const kDocUrl = "https://tools.ietf.org/pdf/"
+	// Where the PDF versions of drafts live.
+	kDocUrl = "https://tools.ietf.org/pdf/"
 
-// Where I normally sync files.
-const kBaseDir = "~/ownCloud/Goodreader/IESG/"
+	// Where I normally sync files.
+	kBaseDir = "~/ownCloud/Goodreader/IESG/"
+)
 
-// Ugh! Globals.
-// TODO[WK]: I started removing globals, confirm not used any more...
-var date string
-
-//Expand homedir - stolen from SO.
+// Expand home directory. Only works on Unix type systems.
+// No sure why Go doesn't include a helper for this.
 func expand(path string) (string, error) {
-	if len(path) == 0 || path[0] != '~' {
+	if len(path) == 0 || !strings.HasPrefix(path, "~") {
 		return path, nil
 	}
 
-	usr, err := user.Current()
+	u, err := user.Current()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(usr.HomeDir, path[1:]), nil
+	return filepath.Join(u.HomeDir, path[1:]), nil
 }
 
 // Helper: checks if a slice (array) already contains an item.
@@ -56,8 +55,8 @@ func contains(array []string, item string) bool {
 	return false
 }
 
-// Checks if provided string an Internet Draft name?
-func ExtractDoc(document string) string {
+// Checks if provided string is an Internet Draft name?
+func extractDoc(document string) string {
 	if strings.HasPrefix(document, "draft-") {
 		return document
 	}
@@ -65,8 +64,8 @@ func ExtractDoc(document string) string {
 }
 
 // Figure out if a token is a link to a document
-func isdoc(t html.Token) bool {
-	// Iterate over all of the Token's attributes until we find an "doc"
+func isDoc(t html.Token) bool {
+	// Iterate over all of the Token's attributes until we find a "doc"
 	for _, a := range t.Attr {
 		// if this is an href, we check if the value is a document link.
 		if a.Key == "href" {
@@ -79,10 +78,10 @@ func isdoc(t html.Token) bool {
 	return false
 }
 
-func ExtractDate(telechat string) string {
-	// Parses out and returns the date from a string. E.g:
-	// "IESG telechat 2017-04-27."   -> "2017-04-27"
-	r := regexp.MustCompile("IESG telechat (.*)")
+// Parses out and returns the date from a string. E.g:
+// "IESG telechat 2017-04-27."   -> "2017-04-27"
+func extractDate(telechat string) string {
+	r := regexp.MustCompile(`IESG telechat (.*)`)
 	date := r.FindStringSubmatch(telechat)
 	if date == nil {
 		glog.Warning("Was not able to extract date from " + telechat)
@@ -92,11 +91,10 @@ func ExtractDate(telechat string) string {
 	return date[1]
 }
 
-func fetch_doc(basedir string, date string,
-	document string, done chan string) {
-	// Fetches a single document, puts it in the directory
-	// specified by date.
-	// Notifies we are done by posting to done!
+// Fetches a single document, puts it in the directory specified by date.
+// Notifies we are done by posting to done!
+func fetchDoc(basedir string, date string, document string, done chan string) {
+
 	filename := document + ".pdf"
 	url := kDocUrl + filename
 
@@ -129,10 +127,10 @@ func fetch_doc(basedir string, date string,
 	done <- fmt.Sprintf("%v: Downloaded %s: %d bytes.", date, filename, n)
 }
 
-func fetch_docs(basedir string, documents map[string][]string) []string {
-	// Concurrently fetches documents.
-	// Takes a map of slices, {"date": [doc1, doc2]} and
-	// gets the documents.
+// Concurrently fetches documents.
+// Takes a map of slices, {"date": [doc1, doc2]} and
+// gets the documents.
+func fetchDocs(basedir string, documents map[string][]string) []string {
 
 	// Make directories if not already exist
 	for date, _ := range documents {
@@ -146,9 +144,9 @@ func fetch_docs(basedir string, documents map[string][]string) []string {
 	doccount := 0
 	var items []string
 	channel := make(chan string)
-	for date, _ = range documents {
+	for date, _ := range documents {
 		for _, document := range documents[date] {
-			go fetch_doc(basedir, date, document, channel)
+			go fetchDoc(basedir, date, document, channel)
 			doccount++
 		}
 	}
@@ -161,17 +159,18 @@ func fetch_docs(basedir string, documents map[string][]string) []string {
 			items = append(items, "Timeout downloading a draft....")
 		}
 	}
+	close(channel)
 	return items
 }
 
-func fetch_iesg_agenda(url string) map[string][]string {
-	// This goes off and fetches the webpage which contains the IESG agenda.
-	// It then parses the page looking for dates, and downloads the documents
-	// for each date, placing the documents in a directories according to the
-	// date. This relies upon the format of the webpage not changing much :-)
+// Fetches the webpage which contains the IESG agenda.
+// It then parses the page looking for dates, and downloads the documents
+// for each date, placing the documents in a directories according to the
+// date. This relies upon the format of the webpage not changing much :-)
 
-	// This returns a "hash of arrays" - in Python it would be:
-	// { "2017-01-01": ["doc1", "doc2"], ...}
+// This returns a "hash of arrays" - in Python it would be:
+// { "2017-01-01": ["doc1", "doc2"], ...}
+func fetchIESGAgenda(url string) map[string][]string {
 	result := make(map[string][]string)
 
 	// In case we find a document before we find the date...
@@ -202,9 +201,9 @@ func fetch_iesg_agenda(url string) map[string][]string {
 			// Check if the token is an <a> tag or an <h2>
 			switch {
 			case t.Data == "a":
-				if isdoc(t) {
+				if isDoc(t) {
 					z.Next()
-					docname := ExtractDoc(string(z.Text()))
+					docname := extractDoc(string(z.Text()))
 					// Check if we already have this document listed for this date.
 					// If a document is on multiple dates we will still download it
 					// multiple times. Not worth fixing...
@@ -218,14 +217,14 @@ func fetch_iesg_agenda(url string) map[string][]string {
 				// If we have an "h2" tag, we want the "content"
 				z.Next()
 				h2string := string(z.Text())
-				date = ExtractDate(h2string)
+				date = extractDate(h2string)
 			default:
 				continue
 			}
 		}
 	}
 	// Should never get here - we should return at tt == html.ErrorToken
-	glog.Fatal("Returned at bottom of fetch_iesg_agenda ?!")
+	glog.Fatal("Returned at bottom of fetchIESGAgenda ?!")
 	return result
 }
 
@@ -238,7 +237,6 @@ func usage() {
 
 func init() {
 	flag.Usage = usage
-	flag.Parse()
 }
 
 func main() {
@@ -252,14 +250,19 @@ func main() {
 		"Where the agenda lives")
 	flag.Parse()
 
-	//flag.Set("logtostderr", "true")
 	flag.Set("stderrthreshold", "ERROR")
 
 	// Convert the ~ (if any) into a home directory.
 	basedir, _ = expand(basedir)
 
-	telechats := fetch_iesg_agenda(baseurl)
-	results := fetch_docs(basedir, telechats)
+	var _, err = os.Stat(basedir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: The base directory (%v) does not exist.\n\n", basedir)
+		usage() // Usage exits.
+	}
+
+	telechats := fetchIESGAgenda(baseurl)
+	results := fetchDocs(basedir, telechats)
 	for _, result := range results {
 		if result != "" {
 			fmt.Printf("%v\n", result)

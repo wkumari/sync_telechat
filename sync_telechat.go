@@ -13,7 +13,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -32,7 +31,8 @@ const (
 )
 
 // Expand home directory. Only works on Unix type systems.
-// No sure why Go doesn't include a helper for this.
+// No sure why Go doesn't include a helper for this (well, I am, I just don't
+// agree :-)
 func expand(path string) (string, error) {
 	if len(path) == 0 || !strings.HasPrefix(path, "~") {
 		return path, nil
@@ -45,7 +45,7 @@ func expand(path string) (string, error) {
 	return filepath.Join(u.HomeDir, path[1:]), nil
 }
 
-// Helper: checks if a slice (array) already contains an item.
+// Helper: checks if a slice already contains an item.
 func contains(array []string, item string) bool {
 	for _, entry := range array {
 		if entry == item {

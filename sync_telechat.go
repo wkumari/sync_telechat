@@ -152,7 +152,7 @@ func fetchAgenda(url string) (map[string][]string, error) {
 
 	err = json.Unmarshal(body, &agenda)
 	if err != nil {
-		log.Errorf("Error unmarshalling agenda: %v", err)
+		log.Errorf("Error unmarshalling agenda: %v (%v)", err, string(body))
 		return result, fmt.Errorf("error unmarshalling agenda: %v", err)
 	}
 
@@ -166,7 +166,11 @@ func fetchAgenda(url string) (map[string][]string, error) {
 				for _, doc := range docs.([]interface{}) {
 					doc := doc.(map[string]interface{})
 					docname := doc["docname"].(string)
-					rev := doc["rev"].(string)
+					rev, ok := doc["rev"].(string)
+					if !ok {
+						rev = ""
+						log.Debugf("No revision for %v, setting to \"\"", docname)
+					}
 					log.Debugf("Doc: %s (date: %s)", docname, date)
 					result[date] = append(result[date], docname+"-"+rev)
 				}
